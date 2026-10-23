@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+
+import * as readline from "node:readline";
+import { loadServerCard, previewNotice, previewResponse } from "./preview.js";
+import { createProxy } from "./proxy.js";
+import type { JsonRpcRequest } from "./types.js";
+import { CLI_VERSION, DEFAULT_ENDPOINT, DOCS_URL } from "./version.js";
+
+const HELP = `n2c-mcp ${CLI_VERSION} — Nodes2Cloud MCP server for stdio clients
+
+Usage:
+  npx -y n2c-mcp              Run the MCP server over stdio (what MCP clients launch)
+  npx -y n2c-mcp install      Write the server into an MCP client's config
+  npx -y n2c-mcp --version    Print the version
+  npx -y n2c-mcp --help       Print this help
+
+Environment:
+  N2C_API_KEY        Personal Access Token (n2c_pat_…). Without it the server runs
+                     in preview mode: it lists its tools but cannot call them.
+  N2C_MCP_ENDPOINT   Remote endpoint. Default: ${DEFAULT_ENDPOINT}
+
+Clients that support remote MCP servers can skip this package and connect to
+${DEFAULT_ENDPOINT} directly, signing in with OAuth.
+
+Docs: ${DOCS_URL}
+`;
+
+/** Protocol traffic only: one JSON-RPC message per line. */
+function send(message: unknown): void {
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+/** Anything for a human goes to stderr, which MCP clients show as server logs. */
+function log(line: string): void {
+  process.stderr.write(`${line}\n`);
+}
+
+/** Reads stdin line by line, and exits once it closes and every request has answered. */
+function serve(handle: (line: string) => Promise<void>): void {
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  let active = 0;
+  let closed = false;
+  const maybeExit = () => {
+    // Exit only once stdout has flushed: a piped stdout is asynchronous, and
+    // `process.exit` would otherwise cut off a large answer (the tool list).
+    if (closed && active === 0) process.stdout.write("", () => process.exit(0));
+  };
+  rl.on("line", (line) => {
+    active++;
+    handle(line)
+      .catch((err: unknown) => log(`n2c-mcp: ${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => {
+        active--;
+        maybeExit();
+      });
+  });
+  rl.on("close", () => {
+    closed = true;
+    maybeExit();
+  });
+}
+
+function runPreview(endpoint: string): void {
+  const cardPromise = loadServerCard(endpoint).then((loaded) => {
+    log(previewNotice(loaded.source));
+    return loaded.card;
+  });
+  serve(async (line) => {
+    if (!line.trim()) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error." } });
+      return;
+    }
+    const card = await cardPromise;
+    for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+      const response = previewResponse(card, message as JsonRpcRequest);
+      if (response !== undefined) send(response);
+    }
+  });
+}
+
+const args = process.argv.slice(2);
+
+if (args.includes("--help") || args.includes("-h")) {
+  process.stdout.write(HELP);
+} else if (args.includes("--version") || args.includes("-v")) {
+  process.stdout.write(`${CLI_VERSION}\n`);
+} else if (args[0] === "install" || args[0] === "setup") {
+  import("./install.js")
+    .then((m) => m.runInstall())
+    .catch((err: unknown) => {
+      log(`Failed to load the installer: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    });
+} else {
+  const apiKey = (process.env.N2C_API_KEY || process.env.N2C_SESSION_TOKEN || "").trim();
+  const endpoint = process.env.N2C_MCP_ENDPOINT || DEFAULT_ENDPOINT;
+  if (!apiKey) {
+    runPreview(endpoint);
+  } else {
+    const proxy = createProxy({ endpoint, apiKey, send, log });
+    serve((line) => proxy.handleLine(line));
+  }
+}

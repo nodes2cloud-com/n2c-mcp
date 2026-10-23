@@ -1,0 +1,51 @@
+{
+  "name": "n2c-mcp",
+  "version": "1.2.0",
+  "mcpName": "com.nodes2cloud/mcp",
+  "description": "Nodes2Cloud MCP server: let coding agents build, validate and deploy Cloudflare Workers workflows in your own Cloudflare account.",
+  "license": "Apache-2.0",
+  "author": "Nodes2Cloud (https://nodes2cloud.com)",
+  "homepage": "https://docs.nodes2cloud.com/docs/getting-started/mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nodes2cloud-com/n2c-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nodes2cloud-com/n2c-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "modelcontextprotocol",
+    "cloudflare",
+    "cloudflare-workers",
+    "workflow",
+    "automation",
+    "ai-agents",
+    "nodes2cloud"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "bin": {
+    "n2c-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "tsc && node --test tests/install.test.mjs tests/proxy.test.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.5",
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tgz
+*.log
+.DS_Store
+# Registry signing keys never belong in the repository.
+*.pem
+mcp-publisher
+.mcpregistry_*

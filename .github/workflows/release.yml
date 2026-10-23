@@ -1,0 +1,55 @@
+name: Release
+
+# Publishes to npm (trusted publishing, with provenance) and then to the
+# official MCP Registry, on a version tag. Runs in the protected `release`
+# environment: restrict it to `v*` tags and add a required reviewer, so no
+# push alone can publish. See SETUP.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      # npm trusted publishing (OIDC) and provenance. No NPM_TOKEN exists.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # Trusted publishing needs npm >= 11.5.1, which Node 24 ships.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Tag matches package.json and server.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          [ "$tag" = "$pkg" ] || { echo "tag $tag != package.json $pkg"; exit 1; }
+          [ "$(jq -r .version server.json)" = "$pkg" ] || { echo "server.json version mismatch"; exit 1; }
+          [ "$(jq -r '.packages[0].version' server.json)" = "$pkg" ] || { echo "server.json package version mismatch"; exit 1; }
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to the MCP Registry (DNS, nodes2cloud.com)
+        env:
+          MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+        run: ./mcp-publisher login dns --domain nodes2cloud.com --private-key "$MCP_REGISTRY_PRIVATE_KEY"
+
+      - name: Publish to the MCP Registry
+        run: ./mcp-publisher publish

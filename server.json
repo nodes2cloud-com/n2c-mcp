@@ -1,0 +1,55 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.nodes2cloud/mcp",
+  "title": "Nodes2Cloud",
+  "description": "Build, validate and deploy workflows as Cloudflare Workers in your own account, with approval.",
+  "version": "1.2.0",
+  "websiteUrl": "https://docs.nodes2cloud.com/docs/getting-started/mcp",
+  "repository": {
+    "url": "https://github.com/nodes2cloud-com/n2c-mcp",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://nodes2cloud.com/apple-touch-icon.png",
+      "mimeType": "image/png",
+      "sizes": ["180x180"]
+    },
+    {
+      "src": "https://nodes2cloud.com/nodes2cloud-mark.svg",
+      "mimeType": "image/svg+xml"
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.nodes2cloud.com/mcp"
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "n2c-mcp",
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "N2C_API_KEY",
+          "description": "Nodes2Cloud Personal Access Token (n2c_pat_…). Without it the server only lists its tools.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "N2C_MCP_ENDPOINT",
+          "description": "Remote MCP endpoint. Defaults to https://api.nodes2cloud.com/mcp.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
