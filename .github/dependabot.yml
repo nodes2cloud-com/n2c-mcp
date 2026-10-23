@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # The package supports Node >=18; Node majors are moved deliberately.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -13,3 +17,8 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Odd Node majors are never LTS (node:25 reached end of life in June 2026),
+    # so the base image only moves to the next LTS by hand.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
