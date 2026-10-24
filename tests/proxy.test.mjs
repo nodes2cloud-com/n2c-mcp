@@ -283,6 +283,12 @@ describe("without a token (preview mode)", () => {
 });
 
 describe("packaging", () => {
+  it("declares the bin in the form npm publish keeps", () => {
+    // `npm publish` drops a bin written as "./dist/index.js"; this one shipped once.
+    const pkg = JSON.parse(readFileSync(path.resolve("package.json"), "utf-8"));
+    assert.equal(pkg.bin["n2c-mcp"], "dist/index.js");
+  });
+
   it("reports the same version as package.json", () => {
     const pkg = JSON.parse(readFileSync(path.resolve("package.json"), "utf-8"));
     assert.equal(CLI_VERSION, pkg.version);
