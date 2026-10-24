@@ -35,7 +35,7 @@
     "README.md"
   ],
   "bin": {
-    "n2c-mcp": "./dist/index.js"
+    "n2c-mcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",

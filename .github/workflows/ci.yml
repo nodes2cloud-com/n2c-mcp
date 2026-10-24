@@ -33,6 +33,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          # The npm that release.yml publishes with.
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: npm publishes the manifest unchanged
+        # `npm publish` silently drops fields it considers invalid (it removed
+        # the `bin` once, which would have shipped a package with no command).
+        # Fail on any auto-correction, and check the packed bin really exists.
+        run: |
+          npm publish --dry-run 2>&1 | tee publish.log
+          if grep -q "auto-corrected" publish.log; then
+            echo "::error::npm would rewrite package.json on publish; run npm pkg fix"
+            exit 1
+          fi
+          npm pack --silent
+          tar -xzf n2c-mcp-*.tgz -O package/package.json \
+            | node -e 'const p=JSON.parse(require("fs").readFileSync(0)); if(!p.bin||!p.bin["n2c-mcp"]){console.error("packed package.json has no n2c-mcp bin");process.exit(1)}'
+          tar -tzf n2c-mcp-*.tgz | grep -qx "package/dist/index.js"
       - name: Versions agree
         run: |
           pkg=$(node -p "require('./package.json').version")
