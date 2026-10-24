@@ -1,5 +1,7 @@
 # Nodes2Cloud MCP server
 
+[![Nodes2Cloud MCP connector – tool definition quality and endpoint health on Glama](https://glama.ai/mcp/connectors/com.nodes2cloud/mcp/badges/score.svg)](https://glama.ai/mcp/connectors/com.nodes2cloud/mcp)
+
 [Nodes2Cloud](https://nodes2cloud.com) lets coding agents (Claude Code, Cursor, VS Code, Windsurf, Zed and other [MCP](https://modelcontextprotocol.io) clients) build automation workflows, validate them, and deploy them as Cloudflare Workers in **your own** Cloudflare account. The server recompiles every deploy itself, and by default each agent deploy waits for you to approve it in the browser.
 
 This package, `n2c-mcp`, is the **stdio** entry point: a small local process that forwards MCP messages over HTTPS to the hosted server. It has no runtime dependencies. If your client supports remote MCP servers, you don't need it at all.
