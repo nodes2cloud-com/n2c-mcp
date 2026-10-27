@@ -41,6 +41,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
+    "sync:clients": "bash scripts/sync-clients.sh",
     "test": "tsc && node --test tests/install.test.mjs tests/proxy.test.mjs"
   },
   "devDependencies": {

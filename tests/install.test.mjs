@@ -1,7 +1,46 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { parseConfigFile, stripJsonComments, updateCodexToml } from "../dist/install.js";
+import {
+  parseConfigFile,
+  resolveConfigPath,
+  setAtKeyPath,
+  stripJsonComments,
+  updateCodexToml,
+  updateTomlTable,
+} from "../dist/install.js";
+
+const scriptPath = path.resolve("dist/index.js");
+
+/**
+ * Runs `n2c-mcp install …` with stdin empty, so a stray prompt answers "" instead
+ * of blocking, and without any token from the caller's environment.
+ */
+function runInstall(args, { home, cwd } = {}) {
+  const env = { ...process.env };
+  delete env.N2C_API_KEY;
+  delete env.N2C_SESSION_TOKEN;
+  if (home) {
+    env.HOME = home;
+    env.USERPROFILE = home;
+    env.APPDATA = path.join(home, "AppData", "Roaming");
+  }
+  const result = spawnSync(process.execPath, [scriptPath, "install", ...args], {
+    encoding: "utf-8",
+    input: "",
+    env,
+    cwd: cwd ?? process.cwd(),
+    timeout: 15_000,
+  });
+  return { status: result.status, out: result.stdout, err: result.stderr };
+}
+
+function tempHome() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "n2c-mcp-install-"));
+}
 
 describe("mcp-cli installer helpers", () => {
   it("stripJsonComments preserves strings with slashes and URLs while removing comments and trailing commas", () => {
@@ -79,49 +118,225 @@ N2C_API_KEY = "new_pat"
     assert.ok(updated.includes(`[other_section]`));
   });
 
-  it("handles CLI flags non-interactively with leading spaces trimmed in PAT", async () => {
-    const { execSync } = await import("node:child_process");
-    const scriptPath = path.resolve("dist/index.js");
-    const out = execSync(
-      `node "${scriptPath}" install --key "  n2c_pat_trimtest123  " --client 11`,
-      { encoding: "utf-8" },
+  it("updateTomlTable leaves similarly named tables alone", () => {
+    const original = `[mcp_servers.nodes2cloud]\nurl = "old"\n\n[mcp_servers.nodes2cloud2]\nurl = "keep"\n`;
+    const updated = updateTomlTable(
+      original,
+      "mcp_servers.nodes2cloud",
+      `[mcp_servers.nodes2cloud]\nurl = "new"`,
     );
+    assert.equal(
+      updated,
+      `[mcp_servers.nodes2cloud]\nurl = "new"\n\n[mcp_servers.nodes2cloud2]\nurl = "keep"\n`,
+    );
+  });
+
+  it("setAtKeyPath treats each key path element as one literal key", () => {
+    const config = { "amp.mcpServers": { other: { url: "x" } }, theme: "dark" };
+    setAtKeyPath(config, ["amp.mcpServers", "nodes2cloud"], { url: "y" });
+    assert.deepEqual(config, {
+      "amp.mcpServers": { other: { url: "x" }, nodes2cloud: { url: "y" } },
+      theme: "dark",
+    });
+    const empty = setAtKeyPath({ servers: "not an object" }, ["servers", "nodes2cloud"], 1);
+    assert.deepEqual(empty, { servers: { nodes2cloud: 1 } });
+  });
+
+  it("resolveConfigPath expands ~, %APPDATA%, %USERPROFILE% and relative paths", () => {
+    const ctx = { home: "/home/me", cwd: "/work/proj", appData: "/appdata" };
+    assert.equal(
+      resolveConfigPath("~/.kiro/settings/mcp.json", ctx),
+      path.join("/home/me", ".kiro", "settings", "mcp.json"),
+    );
+    assert.equal(
+      resolveConfigPath("%APPDATA%\\Claude\\x.json", ctx),
+      path.join("/appdata", "Claude", "x.json"),
+    );
+    assert.equal(
+      resolveConfigPath("%APPDATA%\\Claude\\x.json", { home: "/home/me", cwd: "/" }),
+      path.join("/home/me", "AppData", "Roaming", "Claude", "x.json"),
+    );
+    assert.equal(
+      resolveConfigPath("%USERPROFILE%\\.mcp.json", ctx),
+      path.join("/home/me", ".mcp.json"),
+    );
+    assert.equal(
+      resolveConfigPath(".cursor/mcp.json", ctx),
+      path.resolve("/work/proj", ".cursor", "mcp.json"),
+    );
+  });
+});
+
+describe("n2c-mcp install CLI", () => {
+  it("--client 11 prints the generic proxy config with the trimmed token", () => {
+    const { status, out } = runInstall(["--key", "  n2c_pat_trimtest123  ", "--client", "11"]);
+    assert.equal(status, 0);
     assert.ok(out.includes("n2c_pat_trimtest123"));
     assert.ok(!out.includes("  n2c_pat_trimtest123  "));
-    assert.ok(out.includes("mcpServers"));
+    assert.ok(out.includes('"mcpServers"'));
+    assert.ok(out.includes('"command"'));
   });
 
-  it("prints Zed context_servers format for client 6", async () => {
-    const { execSync } = await import("node:child_process");
-    const scriptPath = path.resolve("dist/index.js");
-    const out = execSync(`node "${scriptPath}" install --key n2c_pat_zedtest --client 6 --print`, {
-      encoding: "utf-8",
-    });
-    assert.ok(out.includes("context_servers"));
-    assert.ok(out.includes("n2c_pat_zedtest"));
+  it("prints Zed context_servers with the token in headers for client 6", () => {
+    const { status, out } = runInstall(["--key", "n2c_pat_zedtest", "--client", "6", "--print"]);
+    assert.equal(status, 0);
+    assert.ok(out.includes('"context_servers"'));
+    assert.ok(out.includes('"headers"'));
+    assert.ok(out.includes("Bearer n2c_pat_zedtest"));
   });
 
-  it("prints VS Code servers format for client 8", async () => {
-    const { execSync } = await import("node:child_process");
-    const scriptPath = path.resolve("dist/index.js");
-    const out = execSync(
-      `node "${scriptPath}" install --key n2c_pat_vscodetest --client 8 --print`,
-      { encoding: "utf-8" },
-    );
-    assert.ok(out.includes("servers"));
-    assert.ok(out.includes('"type": "stdio"'));
+  it("prints VS Code servers over http for client 8", () => {
+    const { status, out } = runInstall(["--key", "n2c_pat_vscodetest", "--client", "8", "--print"]);
+    assert.equal(status, 0);
+    assert.ok(out.includes('"servers"'));
+    assert.ok(out.includes('"type": "http"'));
+    assert.ok(!out.includes('"type": "stdio"'));
     assert.ok(out.includes("n2c_pat_vscodetest"));
   });
 
-  it("prints OpenCode mcp format for client 10", async () => {
-    const { execSync } = await import("node:child_process");
-    const scriptPath = path.resolve("dist/index.js");
-    const out = execSync(
-      `node "${scriptPath}" install --key n2c_pat_opencodetest --client 10 --print`,
-      { encoding: "utf-8" },
-    );
+  it("prints OpenCode remote mcp for client 10", () => {
+    const { status, out } = runInstall([
+      "--key",
+      "n2c_pat_opencodetest",
+      "--client",
+      "10",
+      "--print",
+    ]);
+    assert.equal(status, 0);
     assert.ok(out.includes('"mcp": {'));
-    assert.ok(out.includes('"type": "local"'));
+    assert.ok(out.includes('"type": "remote"'));
     assert.ok(out.includes("n2c_pat_opencodetest"));
+  });
+
+  it("--client kiro --print uses OAuth: prints the url and never asks for a token", () => {
+    const { status, out } = runInstall(["--client", "kiro", "--print"]);
+    assert.equal(status, 0);
+    assert.ok(out.includes("https://api.nodes2cloud.com/mcp"));
+    assert.ok(!out.includes("Enter your Nodes2Cloud Personal Access Token"));
+    assert.ok(!out.includes("n2c_pat_"));
+  });
+
+  it("--env staging points the config at the staging endpoint", () => {
+    const { status, out } = runInstall(["--client", "kiro", "--env", "staging", "--print"]);
+    assert.equal(status, 0);
+    assert.ok(out.includes("https://api-staging.nodes2cloud.com/mcp"));
+  });
+
+  it("resolves the windsurf alias to Devin and prints its commands", () => {
+    const { status, out } = runInstall(["--client", "windsurf"]);
+    assert.equal(status, 0);
+    assert.ok(out.includes("Devin Desktop"));
+    assert.ok(out.includes("devin mcp add -s user nodes2cloud https://api.nodes2cloud.com/mcp"));
+    assert.ok(out.includes("devin mcp login nodes2cloud"));
+  });
+
+  it("rejects an unknown client", () => {
+    const { status, err } = runInstall(["--client", "not-a-client", "--print"]);
+    assert.equal(status, 1);
+    assert.ok(err.includes("Unknown client"));
+  });
+
+  it("--client 1 without a token fails instead of waiting on stdin", () => {
+    const { status, err } = runInstall(["--client", "1", "--print"]);
+    assert.equal(status, 1);
+    assert.ok(err.includes("Must start with n2c_pat_"));
+  });
+
+  it("--list includes listed clients and leaves low-confidence ones out", () => {
+    const { status, out } = runInstall(["--list"]);
+    assert.equal(status, 0);
+    for (const id of ["kiro", "antigravity", "codex", "claude-code"]) {
+      assert.match(out, new RegExp(`^  ${id}\\s`, "m"), `${id} is listed`);
+    }
+    for (const id of ["trae", "windsurf-cascade", "crush"]) {
+      assert.doesNotMatch(out, new RegExp(`^  ${id}\\s`, "m"), `${id} is hidden`);
+    }
+  });
+
+  it("--client kiro merges into an existing ~/.kiro/settings/mcp.json", () => {
+    const home = tempHome();
+    try {
+      const file = path.join(home, ".kiro", "settings", "mcp.json");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(
+        file,
+        `{\n  // mine\n  "mcpServers": { "other": { "command": "other-server" } },\n  "theme": "dark"\n}\n`,
+      );
+      const { status, out } = runInstall(["--client", "kiro"], { home, cwd: home });
+      assert.equal(status, 0, out);
+      assert.ok(out.includes(file));
+      assert.ok(out.includes("approve the browser sign-in"));
+      const written = JSON.parse(fs.readFileSync(file, "utf-8"));
+      assert.deepEqual(written, {
+        mcpServers: {
+          other: { command: "other-server" },
+          nodes2cloud: { url: "https://api.nodes2cloud.com/mcp" },
+        },
+        theme: "dark",
+      });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("--client codex --key writes [mcp_servers.nodes2cloud] once, replacing the old table", () => {
+    const home = tempHome();
+    try {
+      const file = path.join(home, ".codex", "config.toml");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(
+        file,
+        `model = "gpt-5"
+
+[mcp_servers.nodes2cloud]
+command = "npx"
+args = ["-y", "n2c-mcp"]
+[mcp_servers.nodes2cloud.env]
+N2C_API_KEY = "n2c_pat_old"
+
+[mcp_servers.other]
+command = "other"
+`,
+      );
+      for (let run = 0; run < 2; run++) {
+        const { status, out } = runInstall(["--client", "codex", "--key", "n2c_pat_codextest"], {
+          home,
+          cwd: home,
+        });
+        assert.equal(status, 0, out);
+      }
+      const written = fs.readFileSync(file, "utf-8");
+      assert.equal((written.match(/^\[mcp_servers\.nodes2cloud\]$/gm) || []).length, 1);
+      assert.ok(written.includes(`url = "https://api.nodes2cloud.com/mcp"`));
+      assert.ok(written.includes(`Authorization = "Bearer n2c_pat_codextest"`));
+      assert.ok(!written.includes("n2c_pat_old"));
+      assert.ok(!written.includes("[mcp_servers.nodes2cloud.env]"));
+      assert.ok(written.includes(`model = "gpt-5"`));
+      assert.ok(written.includes("[mcp_servers.other]"));
+      if (process.platform !== "win32") {
+        assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("--client 4 writes the project's .cursor/mcp.json", () => {
+    const home = tempHome();
+    try {
+      const { status, out } = runInstall(["--client", "4", "--key", "n2c_pat_cursortest"], {
+        home,
+        cwd: home,
+      });
+      assert.equal(status, 0, out);
+      const file = path.join(fs.realpathSync(home), ".cursor", "mcp.json");
+      const written = JSON.parse(fs.readFileSync(file, "utf-8"));
+      assert.equal(
+        written.mcpServers.nodes2cloud.headers.Authorization,
+        "Bearer n2c_pat_cursortest",
+      );
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });

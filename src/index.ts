@@ -10,9 +10,22 @@ const HELP = `n2c-mcp ${CLI_VERSION} — Nodes2Cloud MCP server for stdio client
 
 Usage:
   npx -y n2c-mcp              Run the MCP server over stdio (what MCP clients launch)
-  npx -y n2c-mcp install      Write the server into an MCP client's config
+  npx -y n2c-mcp install      Add the server to an MCP client (interactive menu)
   npx -y n2c-mcp --version    Print the version
   npx -y n2c-mcp --help       Print this help
+
+Install options:
+  --client, -c <id>           Client id or alias, e.g. kiro, cursor, codex, vscode
+                              (the numbers 1-11 from earlier versions still work)
+  --list                      List the client ids and whether install writes a file
+  --token, --key <pat>        Use a Personal Access Token (default: N2C_API_KEY or
+                              N2C_SESSION_TOKEN). Without one, clients that support
+                              it sign in through the browser (OAuth).
+  --env <name>                production (default), staging or local
+  --endpoint <url>            A custom MCP endpoint URL
+  --scope user|project        Which config file to write. Default: user if the
+                              client has one, else the current project.
+  --print, --dry-run          Print the setup steps without writing any file
 
 Environment:
   N2C_API_KEY        Personal Access Token (n2c_pat_…). Without it the server runs

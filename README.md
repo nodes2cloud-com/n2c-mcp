@@ -32,16 +32,32 @@ VS Code (`.vscode/mcp.json`):
 { "servers": { "nodes2cloud": { "type": "http", "url": "https://api.nodes2cloud.com/mcp" } } }
 ```
 
+### The installer
+
+```bash
+npx -y n2c-mcp@latest install                    # pick a client from a menu
+npx -y n2c-mcp@latest install --client kiro      # or name it
+npx -y n2c-mcp@latest install --list             # every client id
+```
+
+For clients that can sign in through the browser (Kiro, Cursor, VS Code, Antigravity, Zed, Codex, OpenCode and more), the installer writes the remote server's URL into the client's config file and asks for no token: approve the sign-in when the client connects. Pass `--key <PAT>` to use a Personal Access Token instead. Clients that are set up with their own command (Claude Code, Devin, Gemini CLI…) or in an app's settings (Claude, ChatGPT…) get their exact steps printed instead.
+
+| Flag | Meaning |
+|---|---|
+| `--client`, `-c` | Client id or alias, e.g. `kiro`, `cursor`, `vscode`, `codex`, `claude-code`. See `--list`. The numbers 1–11 from earlier versions still work. |
+| `--list` | List the client ids, and which ones get a config file written vs. printed steps |
+| `--key`, `--token` | Personal Access Token. Falls back to `N2C_API_KEY`. Without one, clients that support OAuth sign in through the browser. |
+| `--env` | `production` (default), `staging` or `local` |
+| `--endpoint` | A custom MCP endpoint URL |
+| `--scope` | `user` or `project`: which config file to write. Default: the user file if the client has one, else the project's. |
+| `--print`, `--dry-run` | Print the setup steps without writing any file |
+
+The installer merges into an existing config file and keeps your other servers. When it writes a token, the file is restricted to your user.
+
 ### stdio clients and CI: this package with a Personal Access Token
 
 1. In Nodes2Cloud, open **Integrations → MCP server → Headless & CI Tokens** and create a token (`n2c_pat_…`). It is shown once.
-2. Run the installer and pick your client:
-
-   ```bash
-   npx -y n2c-mcp@latest install
-   ```
-
-   Or configure a client by hand:
+2. Run the installer with the token, e.g. `npx -y n2c-mcp@latest install --client claude --key <PAT>` for Claude Desktop (its config file only runs local servers), or configure a client by hand:
 
    ```json
    {
@@ -55,17 +71,7 @@ VS Code (`.vscode/mcp.json`):
    }
    ```
 
-The installer writes the token into the client's config file in plain text and restricts the file to your user. Keep that file out of version control, and revoke the token from the same screen when you no longer need it.
-
-Non-interactive install: `npx -y n2c-mcp@latest install --key <PAT> --client <1-11> [--print]`.
-
-| Flag | Meaning |
-|---|---|
-| `--key`, `--token` | Personal Access Token. Falls back to `N2C_API_KEY`. |
-| `--client`, `-c` | 1 Claude Desktop, 2 Claude Code, 3 Antigravity, 4 Cursor (project), 5 Windsurf, 6 Zed, 7 Codex, 8 VS Code (global), 9 VS Code (workspace), 10 OpenCode, 11 print only |
-| `--env` | `production` (default), `staging` or `local` |
-| `--endpoint` | A custom MCP endpoint URL |
-| `--print`, `--dry-run` | Print the configuration without writing any file |
+With `--key`, the installer writes the token into the client's config file in plain text and restricts the file to your user. Keep that file out of version control, and revoke the token from the same screen when you no longer need it. `--client 11` prints the generic stdio entry above with your token filled in.
 
 ### Environment
 
