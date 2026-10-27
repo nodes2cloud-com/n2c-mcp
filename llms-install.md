@@ -12,10 +12,20 @@ If the client supports remote (Streamable HTTP) MCP servers, add:
 
 On first use the client opens a browser consent screen. The user approves it. No token is needed.
 
+The installer knows each client's file and field names (they differ: `servers`, `mcpServers`, `context_servers`, `serverUrl`…). Run it with the client's id and it uses OAuth wherever the client supports it, without asking for a token:
+
+```bash
+npx -y n2c-mcp@latest install --client <id>          # e.g. kiro, cursor, vscode, codex, antigravity, zed
+npx -y n2c-mcp@latest install --client <id> --print  # show the steps without writing a file
+npx -y n2c-mcp@latest install --list                 # all client ids
+```
+
+For clients configured by their own command or settings screen (Claude Code, Devin, Gemini CLI, Claude, ChatGPT…), it prints the exact steps instead of writing a file.
+
 ## Otherwise: stdio with a Personal Access Token
 
 1. Ask the user to create a token in Nodes2Cloud under **Integrations → MCP server → Headless & CI Tokens**. It starts with `n2c_pat_`. The user should enter it into the client's MCP settings themselves. Do not ask them to paste it into the chat.
-2. Add this server entry:
+2. Have the user run `npx -y n2c-mcp@latest install --client <id> --key <their token>` in their own terminal, or add this server entry:
 
 ```json
 {
