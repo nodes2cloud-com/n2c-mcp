@@ -46,10 +46,11 @@ For clients that can sign in through the browser (Kiro, Cursor, VS Code, Antigra
 |---|---|
 | `--client`, `-c` | Client id or alias, e.g. `kiro`, `cursor`, `vscode`, `codex`, `claude-code`. See `--list`. The numbers 1–11 from earlier versions still work. |
 | `--list` | List the client ids, and which ones get a config file written vs. printed steps |
-| `--key`, `--token` | Personal Access Token. Falls back to `N2C_API_KEY`. Without one, clients that support OAuth sign in through the browser. |
+| `--key`, `--token` | Personal Access Token. Falls back to `N2C_API_KEY`, then a prompt that doesn't echo. Prefer those two: a token on the command line stays in your shell history. Without one, clients that support OAuth sign in through the browser. |
 | `--env` | `production` (default), `staging` or `local` |
 | `--endpoint` | A custom MCP endpoint URL |
 | `--scope` | `user` or `project`: which config file to write. Default: the user file if the client has one, else the project's. |
+| `--allow-project-token` | Write a token into a project config file that git doesn't ignore. Refused by default, since that file could be committed. |
 | `--print`, `--dry-run` | Print the setup steps without writing any file |
 
 The installer merges into an existing config file and keeps your other servers. When it writes a token, the file is restricted to your user.
@@ -57,7 +58,7 @@ The installer merges into an existing config file and keeps your other servers. 
 ### stdio clients and CI: this package with a Personal Access Token
 
 1. In Nodes2Cloud, open **Integrations → MCP server → Headless & CI Tokens** and create a token (`n2c_pat_…`). It is shown once.
-2. Run the installer with the token, e.g. `npx -y n2c-mcp@latest install --client claude --key <PAT>` for Claude Desktop (its config file only runs local servers), or configure a client by hand:
+2. Run the installer, e.g. `npx -y n2c-mcp@latest install --client claude` for Claude Desktop (its config file only runs local servers), and paste the token at the prompt (or set `N2C_API_KEY` first). Or configure a client by hand:
 
    ```json
    {
@@ -71,14 +72,14 @@ The installer merges into an existing config file and keeps your other servers. 
    }
    ```
 
-With `--key`, the installer writes the token into the client's config file in plain text and restricts the file to your user. Keep that file out of version control, and revoke the token from the same screen when you no longer need it. `--client 11` prints the generic stdio entry above with your token filled in.
+With a token, the installer writes it into the client's config file in plain text and restricts the file to your user. It won't write a token into a project file that git would commit: add the file to `.gitignore`, use `--scope user`, or sign in with OAuth instead. Revoke the token from the same screen when you no longer need it, and create it with the narrowest access that works (e.g. Read only). `--client 11` prints the generic stdio entry above with your token filled in.
 
 ### Environment
 
 | Variable | |
 |---|---|
 | `N2C_API_KEY` | Personal Access Token. Without it, the server runs in **preview mode**: it lists its tools, prompts and resource templates from the public server card, and every tool call returns setup instructions instead of doing anything. |
-| `N2C_MCP_ENDPOINT` | Remote endpoint. Default `https://api.nodes2cloud.com/mcp`. |
+| `N2C_MCP_ENDPOINT` | Remote endpoint, `https://` only (`http://` only for localhost). Default `https://api.nodes2cloud.com/mcp`. |
 
 `npx -y n2c-mcp --help` and `--version` are also available.
 

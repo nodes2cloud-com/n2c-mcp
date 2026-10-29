@@ -154,6 +154,8 @@ export function createProxy(options: ProxyOptions) {
         method: "POST",
         headers,
         body: JSON.stringify(payload),
+        // Never re-send the token somewhere the configured endpoint points us to.
+        redirect: "error",
       });
     } catch (err) {
       replyError(payload, {

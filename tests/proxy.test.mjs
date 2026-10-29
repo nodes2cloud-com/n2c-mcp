@@ -310,3 +310,34 @@ describe("packaging", () => {
     assert.deepEqual(parseResponseBody("", "application/json"), []);
   });
 });
+
+describe("token safety (L14)", () => {
+  it("refuses to send the token to a non-https N2C_MCP_ENDPOINT", async () => {
+    const before = received.length;
+    const { code, stderr } = await runCli([initialize], {
+      N2C_API_KEY: "n2c_pat_good",
+      N2C_MCP_ENDPOINT: "http://example.invalid/mcp",
+    });
+    assert.equal(code, 1);
+    assert.match(stderr, /refusing to send your token/);
+    assert.equal(received.length, before);
+  });
+
+  it("ignores N2C_SESSION_TOKEN, staying in preview mode with a notice", async () => {
+    handler = (_req, res) => res.writeHead(404).end();
+    const { messages, stderr } = await runCli([initialize], {
+      N2C_SESSION_TOKEN: "legacy-session-value",
+    });
+    assert.match(stderr, /N2C_SESSION_TOKEN is no longer supported/);
+    assert.ok(messages.length > 0);
+    assert.ok(
+      !received.some((r) => String(r.headers.authorization).includes("legacy-session-value")),
+    );
+  });
+
+  it("does not follow a redirect with the token", async () => {
+    handler = (_req, res) => res.writeHead(307, { Location: "http://127.0.0.1:9/elsewhere" }).end();
+    const { messages } = await runCli([initialize], { N2C_API_KEY: "n2c_pat_good" });
+    assert.ok(messages[0]?.error, JSON.stringify(messages));
+  });
+});

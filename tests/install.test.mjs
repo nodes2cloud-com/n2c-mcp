@@ -340,3 +340,101 @@ command = "other"
     }
   });
 });
+
+describe("token safety (L14)", () => {
+  function gitRepo() {
+    const dir = tempHome();
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    return dir;
+  }
+
+  it("refuses to write a token into a project file git would commit, writing nothing", () => {
+    const dir = gitRepo();
+    try {
+      const { status, err } = runInstall(["--client", "4", "--key", "n2c_pat_leaktest"], {
+        home: dir,
+        cwd: dir,
+      });
+      assert.equal(status, 1);
+      assert.match(err, /could be committed/);
+      assert.match(err, /\.gitignore/);
+      assert.ok(!fs.existsSync(path.join(dir, ".cursor", "mcp.json")));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes it once git ignores the file, or with --allow-project-token", () => {
+    const ignored = gitRepo();
+    const forced = gitRepo();
+    try {
+      fs.writeFileSync(path.join(ignored, ".gitignore"), ".cursor/\n");
+      const a = runInstall(["--client", "4", "--key", "n2c_pat_ignoredtest"], {
+        home: ignored,
+        cwd: ignored,
+      });
+      assert.equal(a.status, 0, a.err);
+      assert.ok(fs.existsSync(path.join(ignored, ".cursor", "mcp.json")));
+
+      const b = runInstall(
+        ["--client", "4", "--key", "n2c_pat_forcedtest", "--allow-project-token"],
+        { home: forced, cwd: forced },
+      );
+      assert.equal(b.status, 0, b.err);
+      assert.ok(fs.existsSync(path.join(forced, ".cursor", "mcp.json")));
+    } finally {
+      fs.rmSync(ignored, { recursive: true, force: true });
+      fs.rmSync(forced, { recursive: true, force: true });
+    }
+  });
+
+  it("warns that a token on the command line stays in shell history", () => {
+    const { status, out } = runInstall(["--key", "n2c_pat_argvtest", "--client", "11"]);
+    assert.equal(status, 0);
+    assert.match(out, /shell history/);
+  });
+
+  it("refuses a non-https endpoint except for localhost", () => {
+    const bad = runInstall(["--client", "kiro", "--print", "--endpoint", "http://example.com/mcp"]);
+    assert.equal(bad.status, 1);
+    assert.match(bad.err, /not https/);
+    const local = runInstall([
+      "--client",
+      "kiro",
+      "--print",
+      "--endpoint",
+      "http://localhost:8787/mcp",
+    ]);
+    assert.equal(local.status, 0, local.err);
+  });
+
+  it("no longer reads N2C_SESSION_TOKEN as a token", () => {
+    const env = { ...process.env, N2C_SESSION_TOKEN: "n2c_pat_sessiontest" };
+    delete env.N2C_API_KEY;
+    const result = spawnSync(process.execPath, [scriptPath, "install", "--client", "11"], {
+      encoding: "utf-8",
+      input: "",
+      env,
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /N2C_SESSION_TOKEN is no longer supported/);
+    assert.ok(!result.stdout.includes("n2c_pat_sessiontest"));
+  });
+});
+
+describe("endpointProblem", () => {
+  it("accepts https and loopback http, refuses the rest", async () => {
+    const { endpointProblem, isNodes2CloudHost } = await import("../dist/security.js");
+    assert.equal(endpointProblem("https://api.nodes2cloud.com/mcp"), undefined);
+    assert.equal(endpointProblem("http://localhost:8787/mcp"), undefined);
+    assert.equal(endpointProblem("http://127.0.0.1:9/mcp"), undefined);
+    assert.equal(endpointProblem("http://[::1]:9/mcp"), undefined);
+    assert.ok(endpointProblem("http://api.nodes2cloud.com/mcp"));
+    assert.ok(endpointProblem("http://localhost.evil.com/mcp"));
+    assert.ok(endpointProblem("ftp://x/mcp"));
+    assert.ok(endpointProblem("not a url"));
+    assert.equal(isNodes2CloudHost("https://api-staging.nodes2cloud.com/mcp"), true);
+    assert.equal(isNodes2CloudHost("https://nodes2cloud.com.evil.com/mcp"), false);
+  });
+});

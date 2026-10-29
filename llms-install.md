@@ -25,7 +25,7 @@ For clients configured by their own command or settings screen (Claude Code, Dev
 ## Otherwise: stdio with a Personal Access Token
 
 1. Ask the user to create a token in Nodes2Cloud under **Integrations → MCP server → Headless & CI Tokens**. It starts with `n2c_pat_`. The user should enter it into the client's MCP settings themselves. Do not ask them to paste it into the chat.
-2. Have the user run `npx -y n2c-mcp@latest install --client <id> --key <their token>` in their own terminal, or add this server entry:
+2. Have the user run `npx -y n2c-mcp@latest install --client <id>` in their own terminal and paste the token at its prompt, or add this server entry:
 
 ```json
 {

@@ -19,6 +19,7 @@ import {
   toJson,
   wrapAt,
 } from "./clients/index.js";
+import { endpointProblem, gitIgnoreStatus, isNodes2CloudHost } from "./security.js";
 
 type Scope = ConfigLocation["scope"];
 type ConfigStep = Extract<SetupStep, { kind: "config" }>;
@@ -222,6 +223,8 @@ const LEGACY_GENERIC = "11";
 
 interface Prompter {
   question: (q: string) => Promise<string>;
+  /** Like `question`, but a terminal doesn't echo what's typed (for the token). */
+  secret: (q: string) => Promise<string>;
   close: () => void;
 }
 
@@ -229,7 +232,8 @@ interface Prompter {
 function createPrompter(): Prompter {
   let rl: readline.Interface | undefined;
   let closed = false;
-  return {
+  let muted = false;
+  const prompter: Prompter = {
     question(q) {
       if (closed) return Promise.resolve("");
       if (!rl) {
@@ -237,6 +241,15 @@ function createPrompter(): Prompter {
         rl.on("close", () => {
           closed = true;
         });
+        // While muted, echo nothing but the prompt itself (readline writes it before muting).
+        const internal = rl as unknown as { _writeToOutput?: (s: string) => void };
+        const original = internal._writeToOutput;
+        if (typeof original === "function") {
+          const write = original.bind(rl);
+          internal._writeToOutput = (text: string) => {
+            if (!muted || text.includes("\n")) write(muted ? "\n" : text);
+          };
+        }
       }
       const current = rl;
       return new Promise((resolve) => {
@@ -247,15 +260,27 @@ function createPrompter(): Prompter {
         current.once("close", onClose);
         current.question(q, (answer) => {
           current.off("close", onClose);
+          muted = false;
           resolve(answer);
         });
+        if (muted) process.stdout.write(q);
       });
+    },
+    async secret(q) {
+      if (!process.stdin.isTTY) return prompter.question(q);
+      muted = true;
+      try {
+        return await prompter.question(q);
+      } finally {
+        muted = false;
+      }
     },
     close() {
       rl?.close();
       rl = undefined;
     },
   };
+  return prompter;
 }
 
 interface Options {
@@ -372,7 +397,7 @@ async function resolveToken(
   prompter: Prompter,
   supplied: string | undefined,
 ): Promise<string | undefined> {
-  const token = (supplied || (await prompter.question(TOKEN_PROMPT))).trim();
+  const token = (supplied || (await prompter.secret(TOKEN_PROMPT))).trim();
   if (!token.startsWith(TOKEN_PREFIX)) {
     console.error(`Invalid API key format. Must start with ${TOKEN_PREFIX}`);
     return undefined;
@@ -406,6 +431,15 @@ async function install(argv: string[], prompter: Prompter): Promise<number> {
     return 1;
   }
   const url = getArg(argv, ["--endpoint"])?.trim() || MCP_ENDPOINTS[envName as McpEnvironment];
+  // OAuth tokens travel to the same URL, so this holds for every auth mode.
+  const problem = endpointProblem(url);
+  if (problem) {
+    console.error(`Refusing --endpoint ${problem}`);
+    return 1;
+  }
+  if (!isNodes2CloudHost(url)) {
+    console.log(`Note: ${url} is not a Nodes2Cloud host; your client will sign in to it.\n`);
+  }
 
   const scopeArg = getArg(argv, ["--scope"])?.trim().toLowerCase();
   if (scopeArg && scopeArg !== "user" && scopeArg !== "project") {
@@ -413,13 +447,18 @@ async function install(argv: string[], prompter: Prompter): Promise<number> {
     return 1;
   }
 
-  const suppliedToken =
-    (
-      getArg(argv, ["--token", "--key"]) ||
-      process.env.N2C_API_KEY ||
-      process.env.N2C_SESSION_TOKEN ||
-      ""
-    ).trim() || undefined;
+  const argvToken = getArg(argv, ["--token", "--key"])?.trim() || undefined;
+  if (argvToken) {
+    console.log(
+      "Note: a token passed with --key/--token stays in your shell history. Next time, set N2C_API_KEY or paste it at the prompt.\n",
+    );
+  }
+  if (!argvToken && !process.env.N2C_API_KEY && process.env.N2C_SESSION_TOKEN) {
+    console.log(
+      "Note: N2C_SESSION_TOKEN is no longer supported. Use a Personal Access Token (N2C_API_KEY).\n",
+    );
+  }
+  const suppliedToken = argvToken || process.env.N2C_API_KEY?.trim() || undefined;
   const opts: Options = { osName, url, token: suppliedToken };
 
   if (argv.includes("--list")) {
@@ -495,6 +534,31 @@ async function install(argv: string[], prompter: Prompter): Promise<number> {
   }
 
   const filePath = resolveConfigPath(writable.location.path);
+  // A token in a project file is one `git add .` away from a public repo, so require git to
+  // ignore that file first (or an explicit override).
+  if (
+    mode === "token" &&
+    writable.location.scope === "project" &&
+    !argv.includes("--allow-project-token") &&
+    gitIgnoreStatus(filePath) === "tracked-or-unignored"
+  ) {
+    const userScope = findWritable(steps, "user", osName);
+    console.error(
+      [
+        `Not writing your token to ${filePath}: it is inside a git repository and not ignored, so it could be committed.`,
+        "Instead, either:",
+        ...(userScope ? ["  - install for your user: add --scope user"] : []),
+        ...(client.setup.oauth
+          ? [
+              `  - sign in through the browser: run again without --key (${client.label} supports OAuth)`,
+            ]
+          : []),
+        `  - add ${path.relative(process.cwd(), filePath) || filePath} to .gitignore, then run again`,
+        "  - or pass --allow-project-token if you are sure",
+      ].join("\n"),
+    );
+    return 1;
+  }
   writeConfig(writable.step, filePath, mode === "token");
   console.log(
     `Installed ${ctx.name} for ${client.label} in ${filePath} (${writable.location.scope} scope).`,
