@@ -3,6 +3,7 @@
 import * as readline from "node:readline";
 import { loadServerCard, previewNotice, previewResponse } from "./preview.js";
 import { createProxy } from "./proxy.js";
+import { endpointProblem, isNodes2CloudHost } from "./security.js";
 import type { JsonRpcRequest } from "./types.js";
 import { CLI_VERSION, DEFAULT_ENDPOINT, DOCS_URL } from "./version.js";
 
@@ -18,19 +19,24 @@ Install options:
   --client, -c <id>           Client id or alias, e.g. kiro, cursor, codex, vscode
                               (the numbers 1-11 from earlier versions still work)
   --list                      List the client ids and whether install writes a file
-  --token, --key <pat>        Use a Personal Access Token (default: N2C_API_KEY or
-                              N2C_SESSION_TOKEN). Without one, clients that support
-                              it sign in through the browser (OAuth).
+  --token, --key <pat>        Use a Personal Access Token (default: N2C_API_KEY, or
+                              a prompt). Prefer the variable or the prompt: a token
+                              on the command line stays in your shell history.
+                              Without one, clients that support it sign in through
+                              the browser (OAuth).
   --env <name>                production (default), staging or local
   --endpoint <url>            A custom MCP endpoint URL
   --scope user|project        Which config file to write. Default: user if the
                               client has one, else the current project.
   --print, --dry-run          Print the setup steps without writing any file
+  --allow-project-token       Write a token into a project config file even though
+                              git does not ignore it (refused by default)
 
 Environment:
   N2C_API_KEY        Personal Access Token (n2c_pat_…). Without it the server runs
                      in preview mode: it lists its tools but cannot call them.
-  N2C_MCP_ENDPOINT   Remote endpoint. Default: ${DEFAULT_ENDPOINT}
+  N2C_MCP_ENDPOINT   Remote endpoint, https only (http only for localhost).
+                     Default: ${DEFAULT_ENDPOINT}
 
 Clients that support remote MCP servers can skip this package and connect to
 ${DEFAULT_ENDPOINT} directly, signing in with OAuth.
@@ -109,11 +115,24 @@ if (args.includes("--help") || args.includes("-h")) {
       process.exit(1);
     });
 } else {
-  const apiKey = (process.env.N2C_API_KEY || process.env.N2C_SESSION_TOKEN || "").trim();
+  const apiKey = (process.env.N2C_API_KEY || "").trim();
   const endpoint = process.env.N2C_MCP_ENDPOINT || DEFAULT_ENDPOINT;
-  if (!apiKey) {
+  if (!apiKey && process.env.N2C_SESSION_TOKEN) {
+    // Nodes2Cloud no longer accepts a browser session as an MCP credential.
+    log(
+      "n2c-mcp: N2C_SESSION_TOKEN is no longer supported. Create a Personal Access Token in Nodes2Cloud (Integrations → Headless & CI Tokens) and set it as N2C_API_KEY.",
+    );
+  }
+  const problem = apiKey ? endpointProblem(endpoint) : undefined;
+  if (problem) {
+    log(`n2c-mcp: refusing to send your token: N2C_MCP_ENDPOINT ${problem}`);
+    process.exit(1);
+  } else if (!apiKey) {
     runPreview(endpoint);
   } else {
+    if (!isNodes2CloudHost(endpoint)) {
+      log(`n2c-mcp: sending your token to ${endpoint}, which is not a Nodes2Cloud host.`);
+    }
     const proxy = createProxy({ endpoint, apiKey, send, log });
     serve((line) => proxy.handleLine(line));
   }
