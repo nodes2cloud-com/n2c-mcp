@@ -40,22 +40,67 @@ export function isNodes2CloudHost(endpoint: string): boolean {
   }
 }
 
-export type GitIgnoreStatus = "ignored" | "tracked-or-unignored" | "no-repo";
+export type GitIgnoreStatus = "ignored" | "tracked-or-unignored" | "no-repo" | "unknown";
+
+/** The nearest directory at or above `dir` that exists, or the root. */
+function nearestExisting(dir: string): string {
+  let current = dir;
+  while (!fs.existsSync(current) && path.dirname(current) !== current) {
+    current = path.dirname(current);
+  }
+  return current;
+}
+
+/** Whether `dir` or any ancestor holds a `.git` entry (a folder, or a file for worktrees). */
+function insideGitWorkTree(dir: string): boolean {
+  let current = path.resolve(dir);
+  for (;;) {
+    if (fs.existsSync(path.join(current, ".git"))) return true;
+    const parent = path.dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
 
 /**
  * Whether git would ignore `filePath`, so a token written there can't be committed by accident.
- * `no-repo` when the file isn't inside a git work tree (or git isn't installed).
+ * `no-repo` only when no folder at or above the file holds a `.git`. Inside a repository, any
+ * answer git can't give (git missing, a git error) is `unknown`, and callers must treat that as
+ * unsafe: failing open would write the token into a file that may be committed.
  */
 export function gitIgnoreStatus(filePath: string): GitIgnoreStatus {
   // The config's folder may not exist yet (e.g. `.cursor/`); ask from the nearest one that does.
-  let cwd = path.dirname(filePath);
-  while (!fs.existsSync(cwd) && path.dirname(cwd) !== cwd) cwd = path.dirname(cwd);
+  const cwd = nearestExisting(path.dirname(path.resolve(filePath)));
+  if (!insideGitWorkTree(cwd) && !insideGitWorkTree(realpathOr(cwd))) return "no-repo";
   const result = spawnSync("git", ["check-ignore", "-q", "--", path.relative(cwd, filePath)], {
     cwd,
     stdio: "ignore",
   });
-  if (result.error) return "no-repo";
+  if (result.error) return "unknown";
   if (result.status === 0) return "ignored";
   if (result.status === 1) return "tracked-or-unignored";
-  return "no-repo";
+  return "unknown";
+}
+
+function realpathOr(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Whether `filePath`, with every symlink in its existing part resolved, stays inside `root`.
+ * A project-scope config reached through a committed symlink (e.g. `.roo -> /elsewhere`) does not,
+ * so a token written there would land wherever the repository author pointed it.
+ */
+export function staysInside(root: string, filePath: string): boolean {
+  const resolved = path.resolve(filePath);
+  const existing = nearestExisting(resolved);
+  let real = path.join(realpathOr(existing), path.relative(existing, resolved));
+  // An existing file that is itself a symlink counts too.
+  if (fs.existsSync(resolved)) real = realpathOr(resolved);
+  const rel = path.relative(realpathOr(path.resolve(root)), real);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }

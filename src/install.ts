@@ -19,7 +19,7 @@ import {
   toJson,
   wrapAt,
 } from "./clients/index.js";
-import { endpointProblem, gitIgnoreStatus, isNodes2CloudHost } from "./security.js";
+import { endpointProblem, gitIgnoreStatus, isNodes2CloudHost, staysInside } from "./security.js";
 
 type Scope = ConfigLocation["scope"];
 type ConfigStep = Extract<SetupStep, { kind: "config" }>;
@@ -405,8 +405,50 @@ async function resolveToken(
   return token;
 }
 
+/** Why a token must not be written to the project-scope `filePath`, or undefined when it may. */
+function projectTokenRefusal(filePath: string): string | undefined {
+  if (!staysInside(process.cwd(), filePath)) {
+    return "a symlink points it outside this project, so the token would land somewhere the project chose.";
+  }
+  switch (gitIgnoreStatus(filePath)) {
+    case "tracked-or-unignored":
+      return "it is inside a git repository and not ignored, so it could be committed.";
+    case "unknown":
+      return "it is inside a git repository and git could not confirm the file is ignored (is git installed?), so it could be committed.";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Replaces `filePath` with `output` without the token ever sitting in a file other users can
+ * read: the content goes into a new file created with mode 0600, which is then renamed over the
+ * target. A descriptor someone opened on the old file keeps seeing only the old content. A target
+ * that is a symlink (a dotfiles setup) is followed, so the link itself stays in place.
+ */
+function writePrivateFile(filePath: string, output: string): void {
+  let target = filePath;
+  try {
+    target = fs.realpathSync(filePath);
+  } catch {
+    // Doesn't exist yet: create it where asked.
+  }
+  const temp = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  fs.writeFileSync(temp, output, { mode: 0o600, flag: "wx" });
+  try {
+    fs.chmodSync(temp, 0o600); // the umask can only remove bits, but be explicit
+    fs.renameSync(temp, target);
+  } catch (err) {
+    fs.rmSync(temp, { force: true });
+    throw err;
+  }
+}
+
 function writeConfig(step: ConfigStep, filePath: string, restrict: boolean): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, ...(restrict ? { mode: 0o700 } : {}) });
   const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
   let output: string;
   if (step.target.format === "toml") {
@@ -416,9 +458,9 @@ function writeConfig(step: ConfigStep, filePath: string, restrict: boolean): voi
     setAtKeyPath(config, step.target.keyPath, step.target.entry);
     output = `${toJson(config)}\n`;
   }
-  fs.writeFileSync(filePath, output);
-  // The file holds a token in plain text: readable by the user only.
-  if (restrict) fs.chmodSync(filePath, 0o600);
+  // The file holds a token in plain text: readable by the user only, from its first byte.
+  if (restrict) writePrivateFile(filePath, output);
+  else fs.writeFileSync(filePath, output);
 }
 
 async function install(argv: string[], prompter: Prompter): Promise<number> {
@@ -535,17 +577,19 @@ async function install(argv: string[], prompter: Prompter): Promise<number> {
 
   const filePath = resolveConfigPath(writable.location.path);
   // A token in a project file is one `git add .` away from a public repo, so require git to
-  // ignore that file first (or an explicit override).
-  if (
+  // ignore that file first (or an explicit override). When git can't answer inside a repository,
+  // or a symlink takes the file out of the project, refuse too: never fail open.
+  const projectTokenProblem =
     mode === "token" &&
     writable.location.scope === "project" &&
-    !argv.includes("--allow-project-token") &&
-    gitIgnoreStatus(filePath) === "tracked-or-unignored"
-  ) {
+    !argv.includes("--allow-project-token")
+      ? projectTokenRefusal(filePath)
+      : undefined;
+  if (projectTokenProblem) {
     const userScope = findWritable(steps, "user", osName);
     console.error(
       [
-        `Not writing your token to ${filePath}: it is inside a git repository and not ignored, so it could be committed.`,
+        `Not writing your token to ${filePath}: ${projectTokenProblem}`,
         "Instead, either:",
         ...(userScope ? ["  - install for your user: add --scope user"] : []),
         ...(client.setup.oauth

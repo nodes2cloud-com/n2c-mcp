@@ -72,7 +72,7 @@ The installer merges into an existing config file and keeps your other servers. 
    }
    ```
 
-With a token, the installer writes it into the client's config file in plain text and restricts the file to your user. It won't write a token into a project file that git would commit: add the file to `.gitignore`, use `--scope user`, or sign in with OAuth instead. Revoke the token from the same screen when you no longer need it, and create it with the narrowest access that works (e.g. Read only). `--client 11` prints the generic stdio entry above with your token filled in.
+With a token, the installer writes it into the client's config file in plain text and restricts the file to your user. It won't write a token into a project file that git would commit, or where git can't confirm the file is ignored, or through a symlink that leads out of the project: add the file to `.gitignore`, use `--scope user`, or sign in with OAuth instead. Revoke the token from the same screen when you no longer need it, and create it with the narrowest access that works (e.g. Read only). `--client 11` prints the generic stdio entry above with your token filled in.
 
 ### Environment
 

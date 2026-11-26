@@ -19,8 +19,8 @@ const scriptPath = path.resolve("dist/index.js");
  * Runs `n2c-mcp install …` with stdin empty, so a stray prompt answers "" instead
  * of blocking, and without any token from the caller's environment.
  */
-function runInstall(args, { home, cwd } = {}) {
-  const env = { ...process.env };
+function runInstall(args, { home, cwd, env: extraEnv } = {}) {
+  const env = { ...process.env, ...extraEnv };
   delete env.N2C_API_KEY;
   delete env.N2C_SESSION_TOKEN;
   if (home) {
@@ -385,6 +385,102 @@ describe("token safety (L14)", () => {
     } finally {
       fs.rmSync(ignored, { recursive: true, force: true });
       fs.rmSync(forced, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses when git can't answer inside a repository (fails closed)", () => {
+    const dir = gitRepo();
+    // A PATH with no git on it: the .git folder is there, but nothing can check the ignore rules.
+    const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), "n2c-mcp-nogit-"));
+    try {
+      const { status, err } = runInstall(["--client", "4", "--key", "n2c_pat_nogittest"], {
+        home: dir,
+        cwd: dir,
+        env: { PATH: emptyBin, Path: emptyBin },
+      });
+      assert.equal(status, 1);
+      assert.match(err, /git could not confirm/);
+      assert.ok(!fs.existsSync(path.join(dir, ".cursor", "mcp.json")));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(emptyBin, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a project config folder that is a symlink out of the project", () => {
+    const dir = gitRepo();
+    const outside = tempHome();
+    try {
+      fs.writeFileSync(path.join(dir, ".gitignore"), ".cursor/\n");
+      fs.symlinkSync(outside, path.join(dir, ".cursor"), "dir");
+      const { status, err } = runInstall(["--client", "4", "--key", "n2c_pat_symlinktest"], {
+        home: dir,
+        cwd: dir,
+      });
+      assert.equal(status, 1);
+      assert.match(err, /symlink points it outside this project/);
+      assert.ok(!fs.existsSync(path.join(outside, "mcp.json")));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("writes the token into a fresh 0600 file, never into the old readable one", () => {
+    const home = tempHome();
+    try {
+      const file = path.join(home, ".codex", "config.toml");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `model = "gpt-5"\n`, { mode: 0o644 });
+      fs.chmodSync(file, 0o644);
+      const before = fs.statSync(file).ino;
+      const fd = fs.openSync(file, "r"); // a reader that opened the file earlier
+      try {
+        const { status, out } = runInstall(["--client", "codex", "--key", "n2c_pat_atomictest"], {
+          home,
+          cwd: home,
+        });
+        assert.equal(status, 0, out);
+        const held = Buffer.alloc(4096);
+        const n = fs.readSync(fd, held, 0, held.length, 0);
+        assert.ok(!held.subarray(0, n).toString("utf-8").includes("n2c_pat_atomictest"));
+      } finally {
+        fs.closeSync(fd);
+      }
+      assert.ok(fs.readFileSync(file, "utf-8").includes("n2c_pat_atomictest"));
+      if (process.platform !== "win32") {
+        assert.notEqual(fs.statSync(file).ino, before);
+        assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      }
+      assert.deepEqual(
+        fs.readdirSync(path.dirname(file)).filter((f) => f.endsWith(".tmp")),
+        [],
+      );
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a symlinked config file a symlink and writes through it", () => {
+    if (process.platform === "win32") return;
+    const home = tempHome();
+    try {
+      const real = path.join(home, "dotfiles", "config.toml");
+      fs.mkdirSync(path.dirname(real), { recursive: true });
+      fs.writeFileSync(real, `model = "gpt-5"\n`);
+      fs.mkdirSync(path.join(home, ".codex"));
+      const link = path.join(home, ".codex", "config.toml");
+      fs.symlinkSync(real, link);
+      const { status, out } = runInstall(["--client", "codex", "--key", "n2c_pat_linktest"], {
+        home,
+        cwd: home,
+      });
+      assert.equal(status, 0, out);
+      assert.ok(fs.lstatSync(link).isSymbolicLink());
+      assert.ok(fs.readFileSync(real, "utf-8").includes("n2c_pat_linktest"));
+      assert.equal(fs.statSync(real).mode & 0o777, 0o600);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
